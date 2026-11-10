@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://server.arcgisonline.com https://cdn.volanta.app; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Flight Portfolio</title>
+  <meta name="description" content="A timeline map and statistics of my flight simulator flights, tracked with Volanta.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="sample-banner" class="banner" hidden>
+    Showing <strong>sample data</strong>. Set the <code>VOLANTA_USERNAME</code> repository variable to show your own flights (see README).
+  </div>
+
+  <header class="hero">
+    <div class="wrap hero-inner">
+      <div class="pilot">
+        <img id="avatar" class="avatar" alt="" width="72" height="72" hidden>
+        <div id="avatar-fallback" class="avatar avatar-fallback" aria-hidden="true">✈</div>
+        <div>
+          <p class="eyebrow">Flight portfolio</p>
+          <h1 id="pilot-name">Loading…</h1>
+          <p id="pilot-meta" class="muted"></p>
+        </div>
+      </div>
+      <nav class="jump" aria-label="Sections">
+        <a href="#timeline">Timeline</a>
+        <a href="#records">Records</a>
+        <a href="#activity">Activity</a>
+        <a href="#landings">Landings</a>
+        <a href="#fleet">Fleet &amp; airports</a>
+        <a href="#years">Year by year</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section aria-label="Headline totals">
+      <div id="totals" class="tiles"></div>
+    </section>
+
+    <section id="timeline" class="card">
+      <div class="section-head">
+        <div>
+          <h2>Flight timeline</h2>
+          <p class="muted">Every flight in the order you flew it. Press play, or drag the slider.</p>
+        </div>
+        <div id="year-filter" class="chips" role="group" aria-label="Filter by year"></div>
+      </div>
+
+      <div class="timeline-grid">
+        <div class="map-wrap">
+          <div id="map" role="region" aria-label="Map of flight routes"></div>
+          <div class="map-overlay" id="now-card" aria-live="polite"></div>
+        </div>
+        <aside class="flight-list-wrap">
+          <div class="list-head">
+            <h3>Logbook</h3>
+            <span id="list-count" class="muted small"></span>
+          </div>
+          <ol id="flight-list" class="flight-list"></ol>
+        </aside>
+      </div>
+
+      <div class="player">
+        <button id="play" class="btn primary" type="button" aria-label="Play timeline">▶</button>
+        <button id="step-back" class="btn" type="button" aria-label="Previous flight">⟨</button>
+        <button id="step-fwd" class="btn" type="button" aria-label="Next flight">⟩</button>
+        <div class="slider-wrap">
+          <input id="slider" type="range" min="0" max="0" value="0" aria-label="Timeline position">
+          <div class="slider-labels small muted"><span id="date-start"></span><span id="date-now" class="date-now"></span><span id="date-end"></span></div>
+        </div>
+        <label class="speed small muted">Speed
+          <select id="speed">
+            <option value="1">1×</option>
+            <option value="2" selected>2×</option>
+            <option value="4">4×</option>
+            <option value="10">10×</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section id="records">
+      <h2>Records &amp; fun facts</h2>
+      <div id="records-grid" class="records"></div>
+    </section>
+
+    <section id="activity" class="card">
+      <h2>Activity</h2>
+      <h3 class="chart-title">Flights per month</h3>
+      <div id="chart-monthly" class="chart"></div>
+      <div class="two-col">
+        <div>
+          <h3 class="chart-title">When do you fly? <span class="muted small">(local time of departure)</span></h3>
+          <div id="chart-punch" class="chart"></div>
+        </div>
+        <div>
+          <h3 class="chart-title">Last 12 months</h3>
+          <div id="chart-calendar" class="chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="landings" class="card">
+      <h2>Landings</h2>
+      <div class="two-col">
+        <div>
+          <h3 class="chart-title">Touchdown rate distribution <span class="muted small">(fpm)</span></h3>
+          <div id="chart-landing" class="chart"></div>
+        </div>
+        <div id="landing-facts" class="fact-list"></div>
+      </div>
+    </section>
+
+    <section id="fleet" class="card">
+      <h2>Fleet &amp; airports</h2>
+      <div class="three-col">
+        <div><h3 class="chart-title">Aircraft types</h3><div id="top-aircraft" class="bar-list"></div></div>
+        <div><h3 class="chart-title">Busiest airports</h3><div id="top-airports" class="bar-list"></div></div>
+        <div><h3 class="chart-title">Favourite routes</h3><div id="top-routes" class="bar-list"></div></div>
+      </div>
+    </section>
+
+    <section id="years" class="card">
+      <h2>Year by year</h2>
+      <div class="table-scroll"><table id="year-table" class="data-table"></table></div>
+    </section>
+
+    <section id="achievements-section" class="card" hidden>
+      <h2>Achievements</h2>
+      <div id="achievements" class="achievements"></div>
+    </section>
+  </main>
+
+  <footer class="wrap footer muted small">
+    <p>Data from my public <a href="https://fly.volanta.app" rel="noopener noreferrer">Volanta</a> profile, refreshed automatically.
+      <span id="updated"></span> Not affiliated with Volanta or Orbx.
+      Basemap © Esri, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright" rel="noopener noreferrer">OpenStreetMap</a> contributors.</p>
+  </footer>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
