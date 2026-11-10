@@ -4,9 +4,10 @@
   "type": "module",
   "description": "Static flight portfolio built from public Volanta data",
   "scripts": {
-    "fetch": "node scripts/fetch-volanta.mjs",
     "sample": "node scripts/make-sample.mjs",
     "serve": "python3 -m http.server 8765 --directory site"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

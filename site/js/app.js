@@ -63,18 +63,6 @@
   }
 
   // ---------- data ----------
-  async function loadData() {
-    for (const file of ["data/volanta.json", "data/sample.json"]) {
-      try {
-        const res = await fetch(file, { cache: "no-cache" });
-        if (!res.ok) continue;
-        const json = await res.json();
-        if (json && Array.isArray(json.flights)) return json;
-      } catch (_) { /* try next */ }
-    }
-    throw new Error("No flight data found. Run scripts/fetch-volanta.mjs or scripts/make-sample.mjs.");
-  }
-
   function prepare(raw) {
     const airports = raw.airports && typeof raw.airports === "object" ? raw.airports : {};
     const ap = (icao) => {
@@ -115,15 +103,13 @@
     if (Number.isFinite(p.friends)) meta.push(`${p.friends} friends`);
     if (Number.isFinite(p.currentStreak) && p.currentStreak > 0) meta.push(`🔥 ${p.currentStreak}-day streak`);
     $("pilot-meta").textContent = meta.join(" · ");
-    if (p.image && /^https:\/\/cdn\.volanta\.app\//.test(p.image)) {
-      const img = $("avatar");
-      img.src = p.image;
-      img.alt = `${name}'s Volanta avatar`;
-      img.hidden = false;
-      $("avatar-fallback").hidden = true;
-    }
-    if (data.sample) $("sample-banner").hidden = false;
-    if (data.generatedAt) $("updated").textContent = `Last updated ${new Date(data.generatedAt).toLocaleString()}.`;
+    const img = $("avatar");
+    const hasImg = !!(p.image && /^https:\/\/cdn\.volanta\.app\//.test(p.image));
+    if (hasImg) { img.src = p.image; img.alt = `${name}'s Volanta avatar`; } else img.removeAttribute("src");
+    img.hidden = !hasImg;
+    $("avatar-fallback").hidden = hasImg;
+    $("sample-banner").hidden = !data.sample;
+    $("updated").textContent = data.generatedAt ? `Flights loaded ${new Date(data.generatedAt).toLocaleString()}.` : "";
   }
 
   function tile(label, value, unit, sub) {
@@ -169,6 +155,8 @@
     const dark = window.matchMedia("(prefers-color-scheme: dark)");
     const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : dark.matches;
 
+    const ac = new AbortController();
+    const sig = { signal: ac.signal };
     const map = L.map("map", { worldCopyJump: true, minZoom: 1, zoomSnap: 0.25, preferCanvas: true, attributionControl: true });
     map.attributionControl.setPrefix(false);
     let tiles;
@@ -180,7 +168,7 @@
       }).addTo(map);
     };
     setTiles();
-    dark.addEventListener("change", () => { setTiles(); restyle(true); });
+    dark.addEventListener("change", () => { setTiles(); restyle(true); }, sig);
     map.setView([30, 0], 2);
 
     const routeLayer = L.layerGroup().addTo(map);
@@ -199,6 +187,7 @@
     // ----- year filter -----
     const years = [...new Set(all.map((f) => f.offD.getFullYear()))].sort();
     const yf = $("year-filter");
+    yf.replaceChildren();
     const mkChip = (label, val) => {
       const b = el("button", "chip", label);
       b.type = "button";
@@ -418,17 +407,17 @@
       animateFlight();
     }
 
-    playBtn.addEventListener("click", () => (playing ? stop() : play()));
-    $("step-back").addEventListener("click", () => { stop(); go(idx - 1, { fly: true }); });
-    $("step-fwd").addEventListener("click", () => { stop(); go(idx + 1, { fly: true }); });
-    $("slider").addEventListener("input", (e) => { stop(); go(Number(e.target.value)); });
+    playBtn.addEventListener("click", () => (playing ? stop() : play()), sig);
+    $("step-back").addEventListener("click", () => { stop(); go(idx - 1, { fly: true }); }, sig);
+    $("step-fwd").addEventListener("click", () => { stop(); go(idx + 1, { fly: true }); }, sig);
+    $("slider").addEventListener("input", (e) => { stop(); go(Number(e.target.value)); }, sig);
     document.addEventListener("keydown", (e) => {
       if (e.target.closest("input, select, textarea")) return;
       const r = $("timeline").getBoundingClientRect();
       if (r.bottom < 0 || r.top > window.innerHeight) return;
       if (e.key === "ArrowRight") { stop(); go(idx + 1, { fly: true }); e.preventDefault(); }
       if (e.key === "ArrowLeft") { stop(); go(idx - 1, { fly: true }); e.preventDefault(); }
-    });
+    }, sig);
 
     function fitAll() {
       const b = L.latLngBounds([]);
@@ -447,6 +436,7 @@
 
     setFilter("all");
     setTimeout(() => map.invalidateSize(), 50);
+    return () => { stop(); ac.abort(); map.remove(); };
   }
 
   // =====================================================================
@@ -681,8 +671,8 @@
 
   function renderAchievements(data) {
     const list = data.profile?.achievements || [];
+    $("achievements-section").hidden = !list.length;
     if (!list.length) return;
-    $("achievements-section").hidden = false;
     const box = $("achievements");
     box.replaceChildren();
     [...list].sort((a, b) => b.achieved - a.achieved).forEach((a) => {
@@ -697,25 +687,171 @@
   }
 
   // =====================================================================
-  async function main() {
-    let data;
-    try {
-      data = prepare(await loadData());
-    } catch (e) {
-      $("pilot-name").textContent = "No data yet";
-      const m = document.querySelector("main");
-      m.replaceChildren(el("p", "error muted", e.message));
-      return;
-    }
+  // =====================================================================
+  //  Loading flow: username → Volanta tab + bookmarklet → postMessage back
+  // =====================================================================
+  const VOLANTA = "https://fly.volanta.app";
+  const STORE_DATA = "vp-data", STORE_USER = "vp-user";
+  const USER_RE = /^[A-Za-z0-9_.\-]{1,64}$/;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); return true; } catch (_) { return false; } },
+  };
+  let destroyTimeline = null;
+  let pendingUser = null;
+  let current = null;
+
+  function status(msg, isErr) {
+    const s = $("connect-status");
+    s.textContent = msg;
+    s.classList.toggle("err", !!isErr);
+  }
+
+  function show(snapshot, { cache = false } = {}) {
+    const data = prepare(snapshot);
+    current = data;
+    if (cache && !data.sample) store.set(STORE_DATA, JSON.stringify(snapshot));
+    if (!data.sample && data.profile?.userName) store.set(STORE_USER, data.profile.userName);
+    $("start").hidden = true;
+    $("dashboard").hidden = false;
+    $("hero-actions").hidden = false;
+    $("jump").hidden = false;
+    $("btn-refresh").hidden = !!data.sample;
+    if (destroyTimeline) { destroyTimeline(); destroyTimeline = null; }
     renderHeader(data);
     renderTotals(data);
-    try { initTimeline(data); } catch (e) { console.error(e); $("map").textContent = "Map failed to load."; }
+    try { destroyTimeline = initTimeline(data); } catch (e) { console.error(e); $("map").textContent = "Map failed to load."; }
     renderRecords(data);
     renderActivity(data);
     renderLandings(data);
     renderFleet(data);
     renderYears(data);
     renderAchievements(data);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  function showStart({ user, connect = false } = {}) {
+    $("start").hidden = false;
+    $("sample-banner").hidden = true;
+    if (!current) {
+      $("pilot-name").textContent = "Your flight portfolio";
+      $("pilot-meta").textContent = "A timeline map and stats of every flight you've tracked with Volanta.";
+    }
+    const input = $("username");
+    if (user) input.value = user;
+    $("connect").hidden = !connect;
+    if (connect) beginConnect(input.value.trim());
+    window.scrollTo({ top: 0, behavior: "instant" });
+    if (!connect) input.focus();
+  }
+
+  function beginConnect(user) {
+    pendingUser = user;
+    store.set(STORE_USER, user);
+    $("connect").hidden = false;
+    $("bookmarklet").href = VolantaLoader.bookmarkletHref(location.origin);
+    status("");
+    $("open-volanta").focus();
+  }
+
+  function initStart() {
+    $("start-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = $("username").value.trim();
+      if (!USER_RE.test(u)) { $("username").setCustomValidity("Letters, numbers, dots, dashes and underscores only."); $("username").reportValidity(); return; }
+      $("username").setCustomValidity("");
+      beginConnect(u);
+    });
+    $("username").addEventListener("input", () => $("username").setCustomValidity(""));
+
+    $("bookmarklet").addEventListener("click", (e) => {
+      e.preventDefault();
+      status("Drag that button to your bookmarks bar rather than clicking it here. You'll click it on the Volanta tab.", true);
+    });
+
+    $("open-volanta").addEventListener("click", () => {
+      // Deliberately keeps window.opener so the bookmark can hand the data back to this tab.
+      const w = window.open(VOLANTA + "/", "volanta-portfolio");
+      if (!w) status("Your browser blocked the new tab. Allow pop-ups for this site, or open fly.volanta.app yourself: the bookmark will then save a file you can drop below.", true);
+      else status("Waiting for you to click ✈ Send to Portfolio on the Volanta tab…");
+    });
+
+    document.querySelectorAll('[data-action="switch"]').forEach((b) =>
+      b.addEventListener("click", () => showStart({ user: store.get(STORE_USER) || "" })));
+    $("btn-refresh").addEventListener("click", () => {
+      showStart({ user: current?.profile?.userName || store.get(STORE_USER) || "", connect: true });
+    });
+
+    $("try-sample").addEventListener("click", async () => {
+      try {
+        const res = await fetch("data/sample.json", { cache: "no-cache" });
+        show(VolantaNormalize.toSnapshot(await res.json()));
+      } catch (_) { status("Couldn't load the sample data.", true); }
+    });
+
+    // file fallback (bookmark used without this tab attached)
+    const drop = $("drop"), fileInput = $("file-input");
+    const readFile = async (file) => {
+      if (!file) return;
+      if (file.size > 60 * 1024 * 1024) { status("That file is too large.", true); return; }
+      try {
+        const snap = VolantaNormalize.fromRaw(JSON.parse(await file.text()));
+        show(snap, { cache: true });
+      } catch (err) {
+        $("connect").hidden = false;
+        status(`Couldn't read that file: ${err.message}`, true);
+      }
+    };
+    fileInput.addEventListener("change", () => readFile(fileInput.files[0]));
+    ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); readFile(e.dataTransfer.files[0]); });
+
+    // the hand-off from the Volanta tab
+    window.addEventListener("message", (e) => {
+      if (e.origin !== VOLANTA) return;
+      const d = e.data;
+      if (!d || typeof d !== "object") return;
+      if (d.type === "vp-hello") {
+        status("Connected to Volanta. Collecting your flights…");
+        const user = pendingUser || store.get(STORE_USER);
+        if (user && e.source) e.source.postMessage({ type: "vp-user", user }, VOLANTA);
+      } else if (d.type === "vp-data") {
+        try {
+          const snap = VolantaNormalize.fromRaw(d.bundle);
+          pendingUser = null;
+          show(snap, { cache: true });
+          try { window.focus(); } catch (_) { /* ignore */ }
+        } catch (err) {
+          status(`Something went wrong reading the data: ${err.message}`, true);
+        }
+      }
+    });
+  }
+
+  async function main() {
+    initStart();
+    const params = new URLSearchParams(location.search);
+    const urlUser = params.get("user");
+    if (urlUser && USER_RE.test(urlUser)) store.set(STORE_USER, urlUser);
+
+    // 1. this browser's last loaded pilot
+    const cached = store.get(STORE_DATA);
+    if (cached) {
+      try {
+        const snap = VolantaNormalize.toSnapshot(JSON.parse(cached));
+        if (!urlUser || snap.profile?.userName?.toLowerCase() === urlUser.toLowerCase()) { show(snap); return; }
+      } catch (_) { /* fall through */ }
+    }
+    // 2. a portfolio pinned by the site owner (site/data/volanta.json, optional)
+    if (!urlUser) {
+      try {
+        const res = await fetch("data/volanta.json", { cache: "no-cache" });
+        if (res.ok) { show(VolantaNormalize.toSnapshot(await res.json())); return; }
+      } catch (_) { /* none pinned */ }
+    }
+    // 3. ask for a username
+    showStart({ user: store.get(STORE_USER) || urlUser || "" });
   }
   main();
 })();

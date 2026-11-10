@@ -13,7 +13,7 @@
 </head>
 <body>
   <div id="sample-banner" class="banner" hidden>
-    Showing <strong>sample data</strong>. Set the <code>VOLANTA_USERNAME</code> repository variable to show your own flights (see README).
+    You're looking at <strong>sample data</strong>. <button type="button" class="link-btn" data-action="switch">Load your own flights →</button>
   </div>
 
   <header class="hero">
@@ -27,7 +27,12 @@
           <p id="pilot-meta" class="muted"></p>
         </div>
       </div>
-      <nav class="jump" aria-label="Sections">
+      <div class="hero-right">
+      <div id="hero-actions" class="hero-actions" hidden>
+        <button id="btn-refresh" class="btn btn-sm" type="button">↻ Refresh flights</button>
+        <button class="btn btn-sm" type="button" data-action="switch">Change pilot</button>
+      </div>
+      <nav id="jump" class="jump" aria-label="Sections" hidden>
         <a href="#timeline">Timeline</a>
         <a href="#records">Records</a>
         <a href="#activity">Activity</a>
@@ -35,10 +40,55 @@
         <a href="#fleet">Fleet &amp; airports</a>
         <a href="#years">Year by year</a>
       </nav>
+      </div>
     </div>
   </header>
 
   <main class="wrap">
+    <section id="start" class="card start" hidden>
+      <form id="start-form" class="start-form" autocomplete="on">
+        <label for="username" class="start-label">Enter your Volanta username</label>
+        <div class="start-row">
+          <input id="username" name="username" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false"
+                 maxlength="64" pattern="[A-Za-z0-9_.\-]{1,64}" placeholder="e.g. CaptainSmooth" required>
+          <button class="btn primary btn-lg" type="submit">Load my flights</button>
+        </div>
+        <p class="muted small">Your profile on Volanta has to be public. Nothing is stored anywhere except your own browser.</p>
+      </form>
+
+      <div id="connect" class="connect" hidden>
+        <p class="connect-intro">Volanta only shares data with its own website, so your flights are collected from a Volanta tab and handed back here. It takes three clicks:</p>
+        <ol class="steps">
+          <li>
+            <span class="step-n">1</span>
+            <div>
+              <b>One-time setup:</b> drag this button to your bookmarks bar.
+              <div class="bm-row"><a id="bookmarklet" class="bookmarklet" href="#">✈ Send to Portfolio</a>
+                <span class="muted small">No bookmarks bar? Press <kbd>Ctrl/⌘ + Shift + B</kbd>.</span></div>
+            </div>
+          </li>
+          <li>
+            <span class="step-n">2</span>
+            <div><button id="open-volanta" class="btn primary" type="button">Open Volanta ↗</button></div>
+          </li>
+          <li>
+            <span class="step-n">3</span>
+            <div>On the Volanta tab, click <b>✈ Send to Portfolio</b> in your bookmarks bar. Your flights appear here automatically.</div>
+          </li>
+        </ol>
+        <p id="connect-status" class="connect-status" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="start-alt">
+        <label class="drop" id="drop">
+          <input id="file-input" type="file" accept=".json,application/json" hidden>
+          <span>Have a <code>volanta-….json</code> file from the bookmark? <u>Choose it</u> or drop it here.</span>
+        </label>
+        <button class="link-btn" type="button" id="try-sample">Just looking? Try it with sample data</button>
+      </div>
+    </section>
+
+    <div id="dashboard" hidden>
     <section aria-label="Headline totals">
       <div id="totals" class="tiles"></div>
     </section>
@@ -135,10 +185,11 @@
       <h2>Achievements</h2>
       <div id="achievements" class="achievements"></div>
     </section>
+    </div>
   </main>
 
   <footer class="wrap footer muted small">
-    <p>Data from my public <a href="https://fly.volanta.app" rel="noopener noreferrer">Volanta</a> profile, refreshed automatically.
+    <p>Data from public <a href="https://fly.volanta.app" rel="noopener noreferrer">Volanta</a> profiles. It's processed and kept only in your browser.
       <span id="updated"></span> Not affiliated with Volanta or Orbx.
       Basemap © Esri, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright" rel="noopener noreferrer">OpenStreetMap</a> contributors.</p>
   </footer>
@@ -147,6 +198,8 @@
 
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/normalize.js"></script>
+  <script src="js/loader.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
