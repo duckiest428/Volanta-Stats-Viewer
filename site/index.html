@@ -142,8 +142,19 @@
 
     <section id="activity" class="card">
       <h2>Activity</h2>
-      <h3 class="chart-title">Flights per month</h3>
-      <div id="chart-monthly" class="chart"></div>
+      <div class="chart-head">
+        <div>
+          <h3 class="chart-title">Flights flown</h3>
+          <p class="muted small roll-meta"><span id="roll-range"></span> · <span id="roll-summary"></span></p>
+        </div>
+        <div class="roll-nav" role="group" aria-label="Move the 12-month window">
+          <button id="roll-back" class="btn btn-sm" type="button" aria-label="Show one month earlier">‹ Earlier</button>
+          <button id="roll-fwd" class="btn btn-sm" type="button" aria-label="Show one month later">Later ›</button>
+          <button id="roll-latest" class="btn btn-sm" type="button">Latest</button>
+        </div>
+      </div>
+      <div id="chart-monthly" class="chart roll-chart" title="Scroll sideways or use the buttons to move through time"></div>
+      <input id="roll-scrub" class="roll-scrub" type="range" min="0" max="0" value="0" aria-label="Choose which 12 months to show">
       <div class="two-col">
         <div>
           <h3 class="chart-title">When do you fly? <span class="muted small">(local time of departure)</span></h3>

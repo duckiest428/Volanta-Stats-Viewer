@@ -89,6 +89,63 @@
     });
   }
 
+  // Monotone cubic (Fritsch–Carlson): smooth, but never overshoots, so it can't dip below 0.
+  function monotonePath(P) {
+    const n = P.length;
+    if (n < 2) return n ? `M${P[0][0]},${P[0][1]}` : "";
+    const dx = [], dy = [], m = [];
+    for (let i = 0; i < n - 1; i++) { dx[i] = P[i + 1][0] - P[i][0]; dy[i] = P[i + 1][1] - P[i][1]; m[i] = dy[i] / dx[i]; }
+    const t = [m[0]];
+    for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+    t[n - 1] = m[n - 2];
+    let d = `M${P[0][0]},${P[0][1]}`;
+    for (let i = 0; i < n - 1; i++) {
+      const h = dx[i] / 3;
+      d += `C${P[i][0] + h},${P[i][1] + h * t[i]} ${P[i + 1][0] - h},${P[i + 1][1] - h * t[i + 1]} ${P[i + 1][0]},${P[i + 1][1]}`;
+    }
+    return d;
+  }
+
+  /** Smooth area chart. data: [{label, value, tip:[..], tick?:string}] */
+  function area(el, data, opts = {}) {
+    el.replaceChildren();
+    const W = opts.width || 900, H = opts.height || 240;
+    const m = { t: 12, r: 14, b: 28, l: 34 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opts.label || "area chart" }, el);
+    const max = niceMax(Math.max(1, ...data.map((d) => d.value)));
+    for (let i = 0; i <= 4; i++) {
+      const v = (max / 4) * i, y = m.t + ih - (v / max) * ih;
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y, y2: y, class: "gridline" }, svg);
+      const t = svgEl("text", { x: m.l - 6, y: y + 4, "text-anchor": "end", class: "axis" }, svg);
+      t.textContent = Number.isInteger(v) ? v : v.toFixed(1);
+    }
+    const n = data.length;
+    const step = n > 1 ? iw / (n - 1) : 0;
+    const P = data.map((d, i) => [m.l + i * step, m.t + ih - (d.value / max) * ih]);
+    const line = monotonePath(P);
+    const base = m.t + ih;
+    svgEl("path", { d: `${line}L${P[n - 1][0]},${base}L${P[0][0]},${base}Z`, class: "area-fill" }, svg);
+    svgEl("path", { d: line, class: "area-line" }, svg);
+    const cross = svgEl("line", { x1: 0, x2: 0, y1: m.t, y2: base, class: "crosshair", visibility: "hidden" }, svg);
+    const dots = P.map(([x, y]) => svgEl("circle", { cx: x, cy: y, r: 4, class: "area-dot" }, svg));
+    data.forEach((d, i) => {
+      if (d.tick) {
+        const t = svgEl("text", { x: P[i][0], y: H - 8, "text-anchor": "middle", class: "axis" }, svg);
+        t.textContent = d.tick;
+      }
+      const x0 = i === 0 ? m.l - 10 : P[i][0] - step / 2;
+      const hit = svgEl("rect", { x: x0, y: m.t, width: i === 0 || i === n - 1 ? step / 2 + 10 : step, height: ih, class: "hit" }, svg);
+      const on = () => { cross.setAttribute("x1", P[i][0]); cross.setAttribute("x2", P[i][0]); cross.setAttribute("visibility", "visible"); dots[i].setAttribute("r", 6); };
+      const off = () => { cross.setAttribute("visibility", "hidden"); dots[i].setAttribute("r", 4); };
+      bindTip(hit, d.tip || [d.label, String(d.value)]);
+      hit.addEventListener("mouseenter", on);
+      hit.addEventListener("focus", on);
+      hit.addEventListener("mouseleave", off);
+      hit.addEventListener("blur", off);
+    });
+  }
+
   /** Heat grid. rows/cols: label arrays; value(r,c) → number; tipFn(r,c,v) → lines */
   function heat(el, rows, cols, value, tipFn, opts = {}) {
     el.replaceChildren();
@@ -158,5 +215,5 @@
     if (!items.length) { const p = document.createElement("p"); p.className = "muted small"; p.textContent = "No data yet."; el.appendChild(p); }
   }
 
-  window.Charts = { bars, heat, barList, showTip, hideTip };
+  window.Charts = { bars, area, heat, barList, showTip, hideTip };
 })();

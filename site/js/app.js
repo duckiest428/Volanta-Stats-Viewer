@@ -227,8 +227,17 @@
       lines = flights.map((f) => {
         if (!f.A || !f.B) return null;
         const pts = gcPoints(f.A, f.B, Math.max(8, Math.min(96, Math.round((f.dist || 0) / 40))));
-        const line = L.polyline(pts, { weight: 1.5, opacity: 1, interactive: false });
+        // A route that crosses the 180° meridian runs onto the next copy of the world.
+        // Draw it once more, shifted by 360°, so both ends meet a real airport dot.
+        const lons = pts.map((p) => p[1]);
+        const shifts = [0];
+        if (Math.max(...lons) > 180) shifts.push(-360);
+        if (Math.min(...lons) < -180) shifts.push(360);
+        const opts = { weight: 1.5, opacity: 1, interactive: false };
+        const main = L.polyline(pts, opts);
+        const line = L.featureGroup([main, ...shifts.slice(1).map((d) => L.polyline(pts.map(([la, lo]) => [la, lo + d]), opts))]);
         line._pts = pts;
+        line._bounds = main.getBounds();
         return line;
       });
       lines.forEach((l) => l && l.addTo(routeLayer));
@@ -245,7 +254,9 @@
       visits.forEach((v, icao) => {
         const a = data.airports[icao];
         if (!a || !Number.isFinite(a.lat)) return;
-        const m = L.circleMarker([a.lat, a.lon], { radius: Math.min(9, 2.5 + Math.sqrt(v.count)), weight: 1.5, fillOpacity: 0.9 });
+        // repeat each dot on the neighbouring world copies so wrapped routes still end on one
+        const mo = { radius: Math.min(9, 2.5 + Math.sqrt(v.count)), weight: 1.5, fillOpacity: 0.9 };
+        const m = L.featureGroup([-360, 0, 360].map((d) => L.circleMarker([a.lat, a.lon + d], mo)));
         m.bindTooltip(() => {
           const d = el("div");
           d.appendChild(el("b", null, icao + (a.iata ? ` / ${a.iata}` : "")));
@@ -339,7 +350,7 @@
       highlightList();
       const l = lines[idx];
       if (l && fly) {
-        const b = l.getBounds();
+        const b = l._bounds;
         if (!map.getBounds().contains(b)) map.flyToBounds(b.pad(0.6), { duration: 0.8, maxZoom: 7 });
       }
       if (l && !playing) { plane.setLatLng(l._pts[l._pts.length - 1]); setPlaneRot(l._pts[l._pts.length - 2] || l._pts[0], l._pts[l._pts.length - 1]); }
@@ -375,7 +386,7 @@
         anim = requestAnimationFrame(() => setTimeout(next, 250 / speed));
         return;
       }
-      const b = l.getBounds();
+      const b = l._bounds;
       const pts = l._pts;
       plane.setLatLng(pts[0]);
       setPlaneRot(pts[0], pts[1] || pts[0]);
@@ -421,7 +432,7 @@
 
     function fitAll() {
       const b = L.latLngBounds([]);
-      lines.forEach((l) => l && b.extend(l.getBounds()));
+      lines.forEach((l) => l && b.extend(l._bounds));
       if (b.isValid()) map.fitBounds(b.pad(0.1), { maxZoom: 6 });
     }
     function setFilter(year) {
@@ -528,6 +539,84 @@
   // =====================================================================
   //  Activity charts
   // =====================================================================
+  // Rolling 12-month "Flights flown" chart with a movable window.
+  let rollAC = null;
+  function initRolling(byMonth, fl) {
+    if (rollAC) rollAC.abort();
+    rollAC = new AbortController();
+    const sig = { signal: rollAC.signal };
+    const WIN = 12;
+    const now = new Date();
+    const first = new Date(fl[0].offD.getFullYear(), fl[0].offD.getMonth(), 1);
+    const lastFlight = fl[fl.length - 1].offD;
+    const endMonth = new Date(Math.max(now, lastFlight));
+    const last = new Date(endMonth.getFullYear(), endMonth.getMonth(), 1);
+    // pad so there are always at least 12 months to show
+    const start = new Date(Math.min(first, new Date(last.getFullYear(), last.getMonth() - (WIN - 1), 1)));
+    const months = [];
+    for (let d = new Date(start); d <= last; d.setMonth(d.getMonth() + 1)) months.push(new Date(d));
+    const maxEnd = months.length - 1, minEnd = WIN - 1;
+    let end = maxEnd;
+    const scrub = $("roll-scrub");
+    scrub.min = String(minEnd);
+    scrub.max = String(maxEnd);
+    scrub.hidden = maxEnd === minEnd;
+    const label = (d) => `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+
+    function draw() {
+      const win = months.slice(end - WIN + 1, end + 1);
+      const pts = win.map((d, i) => {
+        const v = byMonth.get(monthKey(d)) || { n: 0, s: 0 };
+        return {
+          label: label(d), value: v.n,
+          tip: [label(d), `${v.n} flight${v.n === 1 ? "" : "s"} · ${fmt(v.s / 3600, 1)} h`],
+          tick: i === 0 || d.getMonth() === 0 ? `${MONTHS[d.getMonth()]} ’${String(d.getFullYear()).slice(2)}` : MONTHS[d.getMonth()],
+        };
+      });
+      Charts.area($("chart-monthly"), pts, { label: `Flights flown, ${label(win[0])} to ${label(win[win.length - 1])}`, height: 240 });
+      const n = pts.reduce((a, p) => a + p.value, 0);
+      const h = win.reduce((a, d) => a + ((byMonth.get(monthKey(d)) || {}).s || 0), 0) / 3600;
+      $("roll-range").textContent = `${label(win[0])} – ${label(win[win.length - 1])}`;
+      $("roll-summary").textContent = `${fmt(n)} flight${n === 1 ? "" : "s"}, ${fmt(h, 1)} h`;
+      $("roll-back").disabled = end <= minEnd;
+      $("roll-fwd").disabled = end >= maxEnd;
+      $("roll-latest").disabled = end >= maxEnd;
+      scrub.value = String(end);
+    }
+    const move = (to) => {
+      const next = Math.max(minEnd, Math.min(maxEnd, to));
+      if (next !== end) { end = next; draw(); }
+    };
+    $("roll-back").addEventListener("click", (e) => move(end - (e.shiftKey ? 12 : 1)), sig);
+    $("roll-fwd").addEventListener("click", (e) => move(end + (e.shiftKey ? 12 : 1)), sig);
+    $("roll-latest").addEventListener("click", () => move(maxEnd), sig);
+    scrub.addEventListener("input", () => move(Number(scrub.value)), sig);
+
+    const chart = $("chart-monthly");
+    // sideways trackpad / shift+wheel scrolling moves through time; vertical scroll is left alone
+    let acc = 0;
+    chart.addEventListener("wheel", (e) => {
+      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+      if (!dx) return;
+      e.preventDefault();
+      acc += dx;
+      while (Math.abs(acc) >= 40) { move(end + Math.sign(acc)); acc -= 40 * Math.sign(acc); }
+    }, { passive: false, signal: rollAC.signal });
+    // touch swipe
+    let sx = null;
+    chart.addEventListener("pointerdown", (e) => { if (e.pointerType === "touch") sx = e.clientX; }, sig);
+    chart.addEventListener("pointerup", (e) => {
+      if (sx == null) return;
+      const d = e.clientX - sx; sx = null;
+      if (Math.abs(d) > 30) move(end - Math.round(d / 40));
+    }, sig);
+    chart.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { move(end - 1); e.preventDefault(); e.stopPropagation(); }
+      if (e.key === "ArrowRight") { move(end + 1); e.preventDefault(); e.stopPropagation(); }
+    }, sig);
+    draw();
+  }
+
   function renderActivity(data) {
     const fl = data.flights;
     if (!fl.length) return;
@@ -539,21 +628,7 @@
       v.n++; v.s += f.sec || 0;
       byMonth.set(k, v);
     });
-    const start = new Date(fl[0].offD.getFullYear(), fl[0].offD.getMonth(), 1);
-    const end = new Date(fl[fl.length - 1].offD.getFullYear(), fl[fl.length - 1].offD.getMonth(), 1);
-    const months = [];
-    for (let d = new Date(start); d <= end; d.setMonth(d.getMonth() + 1)) months.push(new Date(d));
-    const every = months.length > 36 ? 12 : months.length > 18 ? 3 : 1;
-    Charts.bars($("chart-monthly"), months.map((d, i) => {
-      const v = byMonth.get(monthKey(d)) || { n: 0, s: 0 };
-      const label = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-      const tickOn = every === 12 ? d.getMonth() === 0 || i === 0 : i % every === 0;
-      return {
-        label, value: v.n,
-        tip: [label, `${v.n} flight${v.n === 1 ? "" : "s"} · ${fmt(v.s / 3600, 1)} h`],
-        tick: tickOn ? (every === 1 && d.getMonth() !== 0 ? MONTHS[d.getMonth()] : every === 12 ? String(d.getFullYear()) : `${MONTHS[d.getMonth()]} ’${String(d.getFullYear()).slice(2)}`) : null,
-      };
-    }), { label: "Flights per month", height: 220 });
+    initRolling(byMonth, fl);
 
     // punchcard
     const grid = Array.from({ length: 7 }, () => Array(24).fill(0));

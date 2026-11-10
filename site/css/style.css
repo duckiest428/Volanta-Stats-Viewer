@@ -226,6 +226,17 @@ kbd { font-family: var(--mono); font-size: .75rem; padding: 1px 5px; border: 1px
 .chart .bar.hl { fill: var(--highlight); }
 .chart .hit { fill: transparent; cursor: default; }
 .chart .hit:hover + .bar, .chart .bar.hover { opacity: .75; }
+.chart .area-fill { fill: var(--accent); fill-opacity: .18; }
+.chart .area-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart .area-dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; pointer-events: none; transition: r .12s; }
+.chart .crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px; margin: 18px 0 6px; }
+.chart-head .chart-title { margin: 0; }
+.roll-meta { margin: 2px 0 0; }
+.roll-nav { display: flex; gap: 6px; }
+.roll-nav .btn:disabled { opacity: .4; cursor: default; border-color: var(--border); }
+.roll-chart { touch-action: pan-y; }
+.roll-scrub { width: 100%; margin: 4px 0 0; accent-color: var(--accent); }
 .chart .cell { stroke: var(--surface-1); stroke-width: 2; }
 .chart .legend { display: flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--text-muted); margin-top: 6px; }
 .chart .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
